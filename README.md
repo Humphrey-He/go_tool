@@ -63,6 +63,16 @@
 
 - 详见 [docs/SDD.md](E:\awesomeProject\go_tool\docs\SDD.md)
 
+## 阶段 2 规范与要求（摘要）
+
+- GORM 语义识别必须支持非连续链式调用与 AST 深度追踪
+- 覆盖 Where/Select/Joins/Group/Having/Order/Limit/Offset
+- Postgres schema live fetch 仅查询 `pg_catalog`/`information_schema`，含 version/TTL/cache 与 search_path
+- MissingIndexRule 遵循最左前缀、算子敏感、冗余索引检测
+- 诊断输出必须有稳定 ID、Quick Fix SQL、置信度分级
+- 性能限制：单包 ≤ 500ms；支持 `.gormlint.yaml` + `//gormlint:ignore`
+- 软删除 `deleted_at` 与 JSONB/GIN 索引建议必须纳入规则
+
 ## 项目路线图
 
 ### Phase 1：MVP（可用最小版本）
@@ -107,18 +117,18 @@ sqlsafelint scan
 ```
 {
   "schema": {
-    "driver": "mysql",
-    "dsn": "user:pass@tcp(127.0.0.1:3306)/db",
-    "ddl": ""
+    "driver": "ddl",
+    "dsn": "",
+    "ddl": "schema.sql"
   },
   "scan": {
-    "workspace": "",
+    "workspace": ".",
     "include": ["**/*.go"],
     "exclude": ["**/vendor/**", "**/.git/**"],
     "workers": 0
   },
   "rules": {
-    "enable": [],
+    "enable": ["FIELD_NOT_EXISTS"],
     "disable": []
   },
   "output": {

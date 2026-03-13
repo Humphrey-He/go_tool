@@ -104,3 +104,65 @@
 - M1: MVP 可扫描并产出 JSON 诊断
 - M2: GORM 识别 + 索引提示
 - M3: 插件化 + CI 集成增强
+
+## 13. 阶段 2 高标准规范与要求
+
+### 总体维度
+
+- 技术深度：语义识别、优化器规则、数据库特性理解。
+- 工程鲁棒性：缓存、容错、权限与性能保障。
+- 易用性：可读诊断、可执行建议、配置开关友好。
+
+### 13.1 语义识别层：GORM Pattern Recognition
+
+要求：必须处理“非连续链式调用”。
+
+规范：
+
+- AST 深度追踪：不能仅识别简单的 `db.Where().Find()`。必须通过 `go/ast` 或 `go/types` 追踪变量赋值。例如，当 `query := db.Model(&User{})` 在函数开头，而 `query.Where(...)` 在条件分支中时，解析器需能还原完整的查询语义树。
+- 方法覆盖率：首批必须完整覆盖 `Where`, `Select`, `Joins`, `Group`, `Having`, `Order`, `Limit`, `Offset`。
+- 常量推导：识别 `Where("age > ?", 18)` 中的字段名。对于动态拼接的字符串字段（虽然不推荐，但常见），需提供“无法解析”的警告而非崩溃。
+
+### 13.2 元数据层：Postgres Schema Live Fetch
+
+要求：建立“轻量化、版本化”的数据库视图快照。
+
+规范：
+
+- 非侵入式查询：仅使用只读权限查询 `pg_catalog` 和 `information_schema`。禁止对生产库产生锁竞争。
+- Schema 缓存版本化：缓存需包含 `MD5(schema_struct)` 或 `last_updated`。当数据库结构变更时，支持手动或根据 TTL 自动触发 Refetch。
+- 多租户支持：在获取 Schema 时，必须明确 SearchPath（Schema 隔离），避免混淆不同 Schema 下的同名表。
+
+### 13.3 核心算法层：MissingIndexRule
+
+要求：模拟数据库优化器的索引匹配逻辑。
+
+规范：
+
+- 左前缀匹配准则：针对复合索引，规则必须能够判断查询条件是否满足“最左匹配原则”。如果 WHERE 只有 age 而索引是 (name, age)，应提示索引失效风险。
+- 算子敏感性：识别 `LIKE '%abc'`、`NOT IN`、`!=` 等导致索引失效的算子，并标记为 High Risk。
+- 冗余索引检测：如果建议增加索引 (a, b)，但表中已有 (a, b, c)，算法应能识别并抑制建议，防止索引膨胀。
+
+### 13.4 诊断输出层：Code & Suggestion
+
+要求：产出必须具备“机器可读”与“人类可感知”的双重属性。
+
+规范：
+
+- 错误码标准化：参考 golangci-lint，每个诊断结果必须有固定 ID（如 `GORM1001: MissingIndex`）。
+- 修复建议（Quick Fix）：Suggestion 不仅要说“缺索引”，还要给出 SQL 语句：`CREATE INDEX idx_user_age ON users(age);`。
+- 置信度分级：输出需带上 Confidence 字段（High/Medium/Low）。例如，解析不出的动态 SQL 标记为 Low，明确的 Full Table Scan 标记为 High。
+
+### 13.5 性能与开关规范
+
+要求：严禁阻塞 CI/CD 流程或本地 IDE 响应。
+
+规范：
+
+- 扫描耗时限制：单个 Package 的 AST 解析加规则检查，耗时应控制在 500ms 以内。
+- 开关粒度：支持配置文件（如 `.gormlint.yaml`）和代码内注释（`//gormlint:ignore`）双重粒度的控制。
+
+### 13.6 进阶风险提示
+
+- 软删除：GORM 默认带 `deleted_at`。MissingIndexRule 必须自动将 `deleted_at` 纳入匹配逻辑，否则索引建议可能失效。
+- JSONB 与 GIN 索引：识别 JSONB 字段查询并建议 GIN 索引。

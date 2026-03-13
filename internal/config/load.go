@@ -2,7 +2,12 @@
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 func Load(path string) (Config, error) {
@@ -16,8 +21,17 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return cfg, err
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".yaml", ".yml":
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return cfg, err
+		}
+	case ".json":
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return cfg, err
+		}
+	default:
+		return cfg, fmt.Errorf("unsupported config format: %s", path)
 	}
 
 	return cfg, nil
