@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"time"
 
+	"go_tool/internal/baseline"
 	"go_tool/internal/config"
 	"go_tool/internal/core/analyzer"
 	"go_tool/internal/output"
@@ -61,6 +62,9 @@ func runScan(ctx context.Context, args []string) error {
 	jsonOnly := fs.Bool("json", false, "output JSON only")
 	sarifOnly := fs.Bool("sarif", false, "output SARIF only")
 	refreshSchema := fs.Bool("refresh-schema", false, "refresh schema cache")
+	outJSON := fs.String("out-json", "", "write JSON report to file")
+	outSarif := fs.String("out-sarif", "", "write SARIF report to file")
+	baselinePath := fs.String("baseline", "", "baseline file path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -101,6 +105,23 @@ func runScan(ctx context.Context, args []string) error {
 	diags, err := eng.Analyze(ctx, cfg)
 	if err != nil {
 		return err
+	}
+
+	base, err := baseline.Load(*baselinePath)
+	if err != nil {
+		return err
+	}
+	diags = baseline.Filter(diags, base)
+
+	if *outSarif != "" {
+		if err := output.WriteSARIFFile(*outSarif, diags); err != nil {
+			return err
+		}
+	}
+	if *outJSON != "" {
+		if err := output.WriteJSONFile(*outJSON, diags); err != nil {
+			return err
+		}
 	}
 
 	if *sarifOnly || cfg.Output.Sarif {

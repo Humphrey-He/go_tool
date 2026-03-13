@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+
 	"go_tool/internal/report"
 )
 
@@ -30,4 +32,13 @@ func WriteSummary(w io.Writer, diags []report.Diagnostic) {
 	}
 
 	_, _ = fmt.Fprintf(w, "Issues: error=%d warn=%d info=%d\n", counts[report.SeverityError], counts[report.SeverityWarn], counts[report.SeverityInfo])
+}
+
+func WriteJSONFile(path string, diags []report.Diagnostic) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return WriteJSON(f, diags)
 }

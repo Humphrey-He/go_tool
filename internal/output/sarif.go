@@ -3,6 +3,7 @@
 import (
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 
 	"go_tool/internal/report"
@@ -109,6 +110,15 @@ func WriteSARIF(w io.Writer, diags []report.Diagnostic) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)
+}
+
+func WriteSARIFFile(path string, diags []report.Diagnostic) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return WriteSARIF(f, diags)
 }
 
 func toSarifLevel(sev report.Severity) string {
