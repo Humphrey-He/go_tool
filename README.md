@@ -103,6 +103,22 @@ sqlsafelint scan
 sqlsafelint scan --sarif
 ```
 
+## Baseline 忽略
+
+```
+{
+  "entries": [
+    {"code": "GORM1001", "file": "./pkg/user/repo.go", "line": 42, "column": 10}
+  ]
+}
+```
+
+使用：
+
+```
+sqlsafelint scan --baseline baseline.json
+```
+
 ## 配置文件示例（.sqlsafelint.json）
 
 ```
@@ -134,10 +150,22 @@ sqlsafelint scan --sarif
 }
 ```
 
+## CLI 参数
+
+- `--out-json`: 输出 JSON 报告到文件
+- `--out-sarif`: 输出 SARIF 报告到文件
+- `--baseline`: 基线忽略文件路径
+- `--refresh-schema`: 强制刷新 schema 缓存
+
+## 插件示例
+
+见 [examples/plugins/example_rule/README.md](E:\awesomeProject\go_tool\examples\plugins\example_rule\README.md)
+
 ## 目录结构（当前）
 
 ```
 cmd/sqlsafelint
+internal/baseline
 internal/cli
 internal/config
 internal/core/analyzer
@@ -149,6 +177,7 @@ internal/schema
 docs/SDD.md
 scripts/ci.sh
 .github/workflows/ci.yml
+examples/plugins/example_rule
 ```
 
 ## 许可证
