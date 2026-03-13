@@ -30,6 +30,38 @@ func (r *MissingIndexRule) Apply(ctx Context, ir parser.SQLIR, sch schema.Schema
 			continue
 		}
 
+		conditions = injectSoftDelete(table, conditions)
+
+		if hasHighRiskOp(conditions) {
+			diags = append(diags, report.Diagnostic{
+				File:       ctx.File,
+				Line:       ctx.Line,
+				Column:     ctx.Column,
+				Snippet:    ctx.Snippet,
+				Rule:       r.ID(),
+				Message:    "operator may disable index usage",
+				Suggestion: "consider rewriting condition or adding computed index",
+				Severity:   report.SeverityWarn,
+				Code:       "GORM1003",
+				Confidence: report.ConfidenceHigh,
+			})
+		}
+
+		if suggestGIN(table, conditions) {
+			diags = append(diags, report.Diagnostic{
+				File:       ctx.File,
+				Line:       ctx.Line,
+				Column:     ctx.Column,
+				Snippet:    ctx.Snippet,
+				Rule:       r.ID(),
+				Message:    "jsonb query without GIN index",
+				Suggestion: fmt.Sprintf("CREATE INDEX idx_%s_jsonb_gin ON %s USING GIN (%s);", sanitizeName(table.Name), table.Name, conditions[0].Column),
+				Severity:   report.SeverityWarn,
+				Code:       "GORM1004",
+				Confidence: report.ConfidenceHigh,
+			})
+		}
+
 		if hasMatchingIndex(table, conditions) {
 			continue
 		}
@@ -63,6 +95,7 @@ func (r *MissingIndexRule) Apply(ctx Context, ir parser.SQLIR, sch schema.Schema
 type Condition struct {
 	Column string
 	Op     string
+	Type   string
 }
 
 func columnConditions(ir parser.SQLIR, table string) []Condition {
@@ -74,9 +107,21 @@ func columnConditions(ir parser.SQLIR, table string) []Condition {
 		if col.Column == "" {
 			continue
 		}
-		out = append(out, Condition{Column: col.Column, Op: "="})
+		out = append(out, Condition{Column: col.Column, Op: col.Op})
 	}
 	return out
+}
+
+func injectSoftDelete(table schema.Table, conditions []Condition) []Condition {
+	if _, ok := table.Columns["deleted_at"]; !ok {
+		return conditions
+	}
+	for _, c := range conditions {
+		if c.Column == "deleted_at" {
+			return conditions
+		}
+	}
+	return append([]Condition{{Column: "deleted_at", Op: "="}}, conditions...)
 }
 
 func hasMatchingIndex(table schema.Table, conditions []Condition) bool {
@@ -135,11 +180,57 @@ func isPrefixCovered(indexCols []string, conditions []Condition) bool {
 func isOperatorSafe(conditions []Condition) bool {
 	for _, c := range conditions {
 		op := strings.ToUpper(strings.TrimSpace(c.Op))
-		if op == "!=" || op == "NOT IN" || strings.HasPrefix(op, "LIKE %") || strings.Contains(op, "LIKE '%") {
+		if op == "!=" || op == "<>" || op == "NOT IN" || strings.Contains(op, "LIKE") {
 			return false
 		}
 	}
 	return true
+}
+
+func hasHighRiskOp(conditions []Condition) bool {
+	for _, c := range conditions {
+		op := strings.ToUpper(strings.TrimSpace(c.Op))
+		if op == "!=" || op == "<>" || op == "NOT IN" {
+			return true
+		}
+		if strings.Contains(op, "LIKE") && strings.Contains(strings.ToUpper(c.Op), "%") {
+			return true
+		}
+	}
+	return false
+}
+
+func suggestGIN(table schema.Table, conditions []Condition) bool {
+	for _, cond := range conditions {
+		col, ok := table.Columns[cond.Column]
+		if !ok {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(col.Type), "jsonb") {
+			continue
+		}
+		op := strings.ToUpper(strings.TrimSpace(cond.Op))
+		if op == "@>" || op == "?" || op == "?|" || op == "?&" || op == "->" || op == "->>" {
+			if !hasGINIndex(table, cond.Column) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasGINIndex(table schema.Table, column string) bool {
+	for _, idx := range table.Indexes {
+		if strings.ToUpper(idx.Method) != "GIN" {
+			continue
+		}
+		for _, col := range idx.Columns {
+			if col == column {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sanitizeName(name string) string {
