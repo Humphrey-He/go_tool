@@ -6,21 +6,6 @@ import (
 	"github.com/xwb1989/sqlparser"
 )
 
-type TableRef struct {
-	Name string
-}
-
-type ColumnRef struct {
-	Table  string
-	Column string
-}
-
-type SQLIR struct {
-	Raw     string
-	Tables  []TableRef
-	Columns []ColumnRef
-}
-
 func ParseVitess(sql string) (SQLIR, error) {
 	stmt, err := sqlparser.Parse(sql)
 	if err != nil {
@@ -40,6 +25,15 @@ func ParseVitess(sql string) (SQLIR, error) {
 				ir.Columns = append(ir.Columns, ColumnRef{
 					Table:  n.Qualifier.Name.String(),
 					Column: col,
+					Op:     "=",
+				})
+			}
+		case *sqlparser.ComparisonExpr:
+			if name, ok := n.Left.(*sqlparser.ColName); ok {
+				ir.Columns = append(ir.Columns, ColumnRef{
+					Table:  name.Qualifier.Name.String(),
+					Column: name.Name.String(),
+					Op:     n.Operator,
 				})
 			}
 		case sqlparser.TableExpr:

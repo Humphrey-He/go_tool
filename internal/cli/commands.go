@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"time"
 
 	"go_tool/internal/config"
 	"go_tool/internal/core/analyzer"
@@ -70,13 +71,20 @@ func runScan(ctx context.Context, args []string) error {
 	if cfg.Scan.Workers <= 0 {
 		cfg.Scan.Workers = runtime.GOMAXPROCS(0)
 	}
+	if cfg.Scan.TimeoutMs <= 0 {
+		cfg.Scan.TimeoutMs = 500
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Scan.TimeoutMs)*time.Millisecond)
+	defer cancel()
 
 	reg := rules.NewRegistry()
 	reg.Register(&rules.FieldNotExistsRule{})
+	reg.Register(&rules.MissingIndexRule{SearchPath: cfg.Schema.SearchPath})
 
 	collector := &analyzer.ASTInspector{}
 	parserImpl := &parser.VitessParser{}
-	loader := &schema.DDLLoader{Path: cfg.Schema.DDL}
+	loader := resolveSchema(cfg)
 
 	eng := analyzer.Engine{
 		Collector: collector,
@@ -103,6 +111,18 @@ func runScan(ctx context.Context, args []string) error {
 	}
 
 	return nil
+}
+
+func resolveSchema(cfg config.Config) schema.Loader {
+	cache := schema.Cache{Path: cfg.Schema.CachePath, TTL: time.Duration(cfg.Schema.CacheTTL) * time.Second}
+	switch cfg.Schema.Driver {
+	case "postgres":
+		return schema.CachedLoader{Loader: &schema.PostgresLoader{DSN: cfg.Schema.DSN, SearchPath: cfg.Schema.SearchPath}, Cache: cache, Source: "postgres", SearchPath: cfg.Schema.SearchPath}
+	case "ddl":
+		return schema.CachedLoader{Loader: &schema.DDLLoader{Path: cfg.Schema.DDL}, Cache: cache, Source: "ddl", SearchPath: cfg.Schema.SearchPath}
+	default:
+		return schema.CachedLoader{Loader: &schema.DDLLoader{Path: cfg.Schema.DDL}, Cache: cache, Source: "ddl", SearchPath: cfg.Schema.SearchPath}
+	}
 }
 
 func hasErrors(diags []report.Diagnostic) bool {

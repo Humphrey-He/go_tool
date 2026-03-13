@@ -1,7 +1,19 @@
 ﻿package parser
 
+type TableRef struct {
+	Name string
+}
+
+type ColumnRef struct {
+	Table  string
+	Column string
+	Op     string
+}
+
 type SQLIR struct {
-	Raw string
+	Raw     string
+	Tables  []TableRef
+	Columns []ColumnRef
 }
 
 type Parser interface {

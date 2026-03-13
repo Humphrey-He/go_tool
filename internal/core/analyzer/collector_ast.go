@@ -40,6 +40,7 @@ func (c *ASTInspector) Collect(ctx context.Context, cfg config.Config) ([]Occurr
 			return nil
 		}
 
+		// SQL string collector
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -52,17 +53,57 @@ func (c *ASTInspector) Collect(ctx context.Context, cfg config.Config) ([]Occurr
 			}
 
 			pos := fset.Position(call.Pos())
-			snippet := lit
 			occurrences = append(occurrences, Occurrence{
 				File:    path,
 				Line:    pos.Line,
 				Column:  pos.Column,
-				Snippet: snippet,
+				Snippet: lit,
 				SQL:     lit,
 			})
 
 			return true
 		})
+
+		// GORM chains collector
+		chains := ExtractGormChains(file)
+		for _, chain := range chains {
+			for _, call := range chain.Calls {
+				if call.Method != "Where" {
+					continue
+				}
+				if len(call.Args) == 0 {
+					continue
+				}
+
+				if IsDynamicString(call.Args[0]) {
+					pos := fset.Position(call.Pos)
+					occurrences = append(occurrences, Occurrence{
+						File:    path,
+						Line:    pos.Line,
+						Column:  pos.Column,
+						Snippet: "dynamic where clause",
+						SQL:     "",
+						Kind:    OccurrenceKindGormWarning,
+					})
+					continue
+				}
+
+				field, ok := ExtractWhereFields(call.Args[0])
+				if !ok {
+					continue
+				}
+
+				pos := fset.Position(call.Pos)
+				occurrences = append(occurrences, Occurrence{
+					File:    path,
+					Line:    pos.Line,
+					Column:  pos.Column,
+					Snippet: field,
+					SQL:     field,
+					Kind:    OccurrenceKindGormWhere,
+				})
+			}
+		}
 
 		return nil
 	})

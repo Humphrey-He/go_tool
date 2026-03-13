@@ -39,7 +39,7 @@ func (l *DDLLoader) Load(ctx context.Context) (Schema, error) {
 			name := extractTableName(line)
 			if name != "" {
 				currentTable = name
-				builder.Tables[currentTable] = Table{Name: currentTable, Columns: map[string]Column{}}
+				builder.Tables[currentTable] = Table{Name: currentTable, Columns: map[string]Column{}, Indexes: map[string]Index{}}
 			}
 			continue
 		}

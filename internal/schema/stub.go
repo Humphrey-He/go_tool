@@ -1,9 +1,13 @@
 ﻿package schema
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type StubLoader struct{}
 
 func (l *StubLoader) Load(ctx context.Context) (Schema, error) {
-	return Schema{}, nil
+	_ = ctx
+	return Schema{}, fmt.Errorf("stub loader not implemented")
 }
