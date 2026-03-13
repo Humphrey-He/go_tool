@@ -1,0 +1,20 @@
+﻿{
+  "schema": {
+    "driver": "ddl",
+    "dsn": "",
+    "ddl": "schema.sql"
+  },
+  "scan": {
+    "workspace": ".",
+    "include": ["**/*.go"],
+    "exclude": ["**/vendor/**", "**/.git/**"],
+    "workers": 0
+  },
+  "rules": {
+    "enable": ["FIELD_NOT_EXISTS"],
+    "disable": []
+  },
+  "output": {
+    "json": true
+  }
+}
