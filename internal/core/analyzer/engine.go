@@ -54,6 +54,8 @@ func (e *Engine) Analyze(ctx context.Context, cfg config.Config) ([]report.Diagn
 		return nil, err
 	}
 
+	activeRules := e.Rules.Filtered(cfg.Rules.Enable, cfg.Rules.Disable)
+
 	var diags []report.Diagnostic
 	for _, occ := range occurrences {
 		if occ.Kind == OccurrenceKindGormWarning {
@@ -80,7 +82,7 @@ func (e *Engine) Analyze(ctx context.Context, cfg config.Config) ([]report.Diagn
 				Column:  occ.Column,
 				Snippet: occ.Snippet,
 			}
-			for _, rule := range e.Rules.All() {
+			for _, rule := range activeRules {
 				results, err := rule.Apply(ctxRule, ir, sch)
 				if err != nil {
 					diags = append(diags, report.Diagnostic{
@@ -124,7 +126,7 @@ func (e *Engine) Analyze(ctx context.Context, cfg config.Config) ([]report.Diagn
 			Snippet: occ.Snippet,
 		}
 
-		for _, rule := range e.Rules.All() {
+		for _, rule := range activeRules {
 			results, err := rule.Apply(ctxRule, ir, sch)
 			if err != nil {
 				diags = append(diags, report.Diagnostic{

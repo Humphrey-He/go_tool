@@ -7,7 +7,9 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"go_tool/internal/config"
 )
@@ -15,15 +17,12 @@ import (
 type ASTInspector struct{}
 
 func (c *ASTInspector) Collect(ctx context.Context, cfg config.Config) ([]Occurrence, error) {
-	_ = ctx
 	root := cfg.Scan.Workspace
 	if root == "" {
 		root = "."
 	}
 
-	var occurrences []Occurrence
-	fset := token.NewFileSet()
-
+	files := make([]string, 0, 128)
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -34,97 +33,180 @@ func (c *ASTInspector) Collect(ctx context.Context, cfg config.Config) ([]Occurr
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-
-		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
-		if err != nil {
+		if !shouldInclude(path, cfg.Scan.Include, cfg.Scan.Exclude) {
 			return nil
 		}
-
-		// SQL string collector
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-
-			lit := extractSQLFromCall(call)
-			if lit == "" {
-				return true
-			}
-
-			pos := fset.Position(call.Pos())
-			occurrences = append(occurrences, Occurrence{
-				File:    path,
-				Line:    pos.Line,
-				Column:  pos.Column,
-				Snippet: lit,
-				SQL:     lit,
-				Kind:    OccurrenceKindSQL,
-			})
-
-			return true
-		})
-
-		// GORM chains collector
-		chains := ExtractGormChains(file)
-		for _, chain := range chains {
-			currentTable := ""
-			for _, call := range chain.Calls {
-				if call.Method == "Model" || call.Method == "Table" {
-					if len(call.Args) > 0 {
-						if table, ok := ExtractModelTable(call.Args[0]); ok {
-							currentTable = table
-						}
-					}
-				}
-
-				if call.Method != "Where" {
-					continue
-				}
-				if len(call.Args) == 0 {
-					continue
-				}
-
-				if IsDynamicString(call.Args[0]) {
-					pos := fset.Position(call.Pos)
-					occurrences = append(occurrences, Occurrence{
-						File:    path,
-						Line:    pos.Line,
-						Column:  pos.Column,
-						Snippet: "dynamic where clause",
-						SQL:     "",
-						Kind:    OccurrenceKindGormWarning,
-					})
-					continue
-				}
-
-				field, op, ok := ExtractWhereFields(call.Args[0])
-				if !ok {
-					continue
-				}
-
-				pos := fset.Position(call.Pos)
-				occurrences = append(occurrences, Occurrence{
-					File:    path,
-					Line:    pos.Line,
-					Column:  pos.Column,
-					Snippet: field,
-					SQL:     field,
-					Table:   currentTable,
-					Op:      op,
-					Kind:    OccurrenceKindGormWhere,
-				})
-			}
-		}
-
+		files = append(files, path)
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
+	workers := cfg.Scan.Workers
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+
+	var (
+		mu          sync.Mutex
+		occurrences []Occurrence
+		wg          sync.WaitGroup
+		fileCh      = make(chan string)
+		errCh       = make(chan error, 1)
+	)
+
+	workerFn := func() {
+		defer wg.Done()
+		fset := token.NewFileSet()
+		for path := range fileCh {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+			if err != nil {
+				continue
+			}
+
+			var local []Occurrence
+
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+
+				lit := extractSQLFromCall(call)
+				if lit == "" {
+					return true
+				}
+
+				pos := fset.Position(call.Pos())
+				local = append(local, Occurrence{
+					File:    path,
+					Line:    pos.Line,
+					Column:  pos.Column,
+					Snippet: lit,
+					SQL:     lit,
+					Kind:    OccurrenceKindSQL,
+				})
+
+				return true
+			})
+
+			chains := ExtractGormChains(file)
+			for _, chain := range chains {
+				currentTable := ""
+				for _, call := range chain.Calls {
+					if call.Method == "Model" || call.Method == "Table" {
+						if len(call.Args) > 0 {
+							if table, ok := ExtractModelTable(call.Args[0]); ok {
+								currentTable = table
+							}
+						}
+					}
+
+					if call.Method != "Where" {
+						continue
+					}
+					if len(call.Args) == 0 {
+						continue
+					}
+
+					if IsDynamicString(call.Args[0]) {
+						pos := fset.Position(call.Pos)
+						local = append(local, Occurrence{
+							File:    path,
+							Line:    pos.Line,
+							Column:  pos.Column,
+							Snippet: "dynamic where clause",
+							SQL:     "",
+							Kind:    OccurrenceKindGormWarning,
+						})
+						continue
+					}
+
+					field, op, ok := ExtractWhereFields(call.Args[0])
+					if !ok {
+						continue
+					}
+
+					pos := fset.Position(call.Pos)
+					local = append(local, Occurrence{
+						File:    path,
+						Line:    pos.Line,
+						Column:  pos.Column,
+						Snippet: field,
+						SQL:     field,
+						Table:   currentTable,
+						Op:      op,
+						Kind:    OccurrenceKindGormWhere,
+					})
+				}
+			}
+
+			mu.Lock()
+			occurrences = append(occurrences, local...)
+			mu.Unlock()
+		}
+	}
+
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go workerFn()
+	}
+
+	go func() {
+		defer close(fileCh)
+		for _, path := range files {
+			select {
+			case <-ctx.Done():
+				return
+			case fileCh <- path:
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+
+	if err := <-errCh; err != nil {
+		return nil, err
+	}
+
 	return occurrences, nil
+}
+
+func shouldInclude(path string, includes, excludes []string) bool {
+	if len(excludes) > 0 && matchAny(path, excludes) {
+		return false
+	}
+	if len(includes) == 0 {
+		return true
+	}
+	return matchAny(path, includes)
+}
+
+func matchAny(path string, patterns []string) bool {
+	path = filepath.ToSlash(path)
+	for _, pattern := range patterns {
+		p := filepath.ToSlash(pattern)
+		if strings.Contains(p, "**") {
+			trim := strings.ReplaceAll(p, "**", "")
+			if trim != "" && strings.Contains(path, trim) {
+				return true
+			}
+		}
+		if ok, _ := filepath.Match(p, path); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func extractSQLFromCall(call *ast.CallExpr) string {
