@@ -32,7 +32,7 @@
 - 索引命中检查（基于 `WHERE` 条件的索引覆盖建议）
 - 性能风险提示（潜在全表扫描、危险语句、复杂 `LIKE`）
 - 规则引擎（规则注册/启用/禁用，自定义规则插件）
-- 输出与集成（JSON 诊断 + 终端 summary，CI 支持）
+- 输出与集成（JSON 诊断 + SARIF + 终端 summary，CI 支持）
 - CLI（`init`/`scan`/`serve` 可选，支持 mono-repo）
 
 ## 设计原则
@@ -45,19 +45,6 @@
 - 并行分析（可配置 worker 池）
 - CI 友好（机器可读输出与稳定退出码）
 - 安全与隐私（不上传源码，远程拉取 schema 可审计）
-
-## 开发规范
-
-- Go 版本：Go 1.21+，必要时使用 `go:build` 约束
-- 语义化版本：`v0.1.0` 起
-- 代码风格：`gofmt`/`gofumpt`，`golangci-lint` 严格规则（`errcheck`, `staticcheck`, `gosimple`, `govet`）
-- 包边界：`api/cli/core/analyzer/parser/schema/rules/output`
-- 接口优先，避免全局可变状态
-- 并发：worker 池扫描，数量可配置
-- 错误处理：统一 error 包装（`errors.Join`/`fmt.Errorf("%w")`），输出稳定 code
-- 日志：结构化 logger（`zap`/`zerolog`），支持 `--json-log`
-- 测试：单测覆盖 ≥ 80%，关键路径 `Benchmark`
-- 文档：pkg doc + README + CLI 示例 + Rule 编写示例
 
 ## SDD 文档
 
@@ -92,9 +79,10 @@
 
 ### Phase 3：工程化集成
 
-- `go vet` 插件化
-- `golangci-lint` 插件化
+- 规则插件化
 - CI 运行支持与基线忽略
+- JSON/SARIF 输出
+- 更多数据库方言（MySQL/Postgres/DDL）
 
 ### Phase 4：扩展与优化
 
@@ -110,6 +98,9 @@ sqlsafelint init
 
 # 运行扫描
 sqlsafelint scan
+
+# 输出 SARIF
+sqlsafelint scan --sarif
 ```
 
 ## 配置文件示例（.sqlsafelint.json）
@@ -119,20 +110,26 @@ sqlsafelint scan
   "schema": {
     "driver": "ddl",
     "dsn": "",
-    "ddl": "schema.sql"
+    "ddl": "schema.sql",
+    "search_path": ["public"],
+    "cache_ttl": 300,
+    "cache_path": ".sqlsafelint.schema.json"
   },
   "scan": {
     "workspace": ".",
     "include": ["**/*.go"],
     "exclude": ["**/vendor/**", "**/.git/**"],
-    "workers": 0
+    "workers": 0,
+    "timeout_ms": 500
   },
   "rules": {
-    "enable": ["FIELD_NOT_EXISTS"],
-    "disable": []
+    "enable": ["GORM1001", "GORM1002"],
+    "disable": [],
+    "plugins": []
   },
   "output": {
-    "json": true
+    "json": true,
+    "sarif": false
   }
 }
 ```
@@ -150,6 +147,8 @@ internal/report
 internal/rules
 internal/schema
 docs/SDD.md
+scripts/ci.sh
+.github/workflows/ci.yml
 ```
 
 ## 许可证

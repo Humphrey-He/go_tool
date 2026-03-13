@@ -16,9 +16,11 @@
   },
   "rules": {
     "enable": ["GORM1001", "GORM1002"],
-    "disable": []
+    "disable": [],
+    "plugins": []
   },
   "output": {
-    "json": true
+    "json": true,
+    "sarif": false
   }
 }
