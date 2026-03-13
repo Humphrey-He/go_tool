@@ -55,13 +55,13 @@ func (l *DDLLoader) Load(ctx context.Context) (Schema, error) {
 			continue
 		}
 
-		col := extractColumnName(line)
+		col, typ := extractColumn(line)
 		if col == "" {
 			continue
 		}
 
 		table := builder.Tables[currentTable]
-		table.Columns[col] = Column{Name: col}
+		table.Columns[col] = Column{Name: col, Type: typ}
 		builder.Tables[currentTable] = table
 	}
 
@@ -84,16 +84,20 @@ func extractTableName(line string) string {
 	return name
 }
 
-func extractColumnName(line string) string {
+func extractColumn(line string) (string, string) {
 	line = strings.TrimSpace(line)
 	line = strings.TrimSuffix(line, ",")
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
-		return ""
+		return "", ""
 	}
 	name := strings.Trim(parts[0], "`\"")
 	if name == "" || strings.HasPrefix(strings.ToUpper(name), "PRIMARY") || strings.HasPrefix(strings.ToUpper(name), "UNIQUE") || strings.HasPrefix(strings.ToUpper(name), "KEY") || strings.HasPrefix(strings.ToUpper(name), "CONSTRAINT") {
-		return ""
+		return "", ""
 	}
-	return name
+	typ := ""
+	if len(parts) > 1 {
+		typ = strings.Trim(parts[1], "`\"")
+	}
+	return name, typ
 }

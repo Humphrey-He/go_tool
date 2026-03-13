@@ -4,6 +4,7 @@ import "context"
 
 type Column struct {
 	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type Index struct {
@@ -54,6 +55,16 @@ func (s Schema) FindTable(table string, searchPath []string) (Table, bool) {
 	return Table{}, false
 }
 
+func (s Schema) ColumnType(table, column string, searchPath []string) string {
+	if t, ok := s.FindTable(table, searchPath); ok {
+		if c, ok := t.Columns[column]; ok {
+			return c.Type
+		}
+	}
+	return ""
+}
+
+// Loader loads schema metadata from a source.
 type Loader interface {
 	Load(ctx context.Context) (Schema, error)
 }

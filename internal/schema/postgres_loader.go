@@ -35,7 +35,7 @@ func (l *PostgresLoader) Load(ctx context.Context) (Schema, error) {
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT table_schema, table_name, column_name
+		SELECT table_schema, table_name, column_name, data_type
 		FROM information_schema.columns
 		WHERE table_schema = ANY($1)
 		ORDER BY table_schema, table_name, ordinal_position
@@ -47,8 +47,8 @@ func (l *PostgresLoader) Load(ctx context.Context) (Schema, error) {
 
 	builder := NewSchema()
 	for rows.Next() {
-		var schemaName, tableName, columnName string
-		if err := rows.Scan(&schemaName, &tableName, &columnName); err != nil {
+		var schemaName, tableName, columnName, dataType string
+		if err := rows.Scan(&schemaName, &tableName, &columnName, &dataType); err != nil {
 			return Schema{}, err
 		}
 		fullTable := fmt.Sprintf("%s.%s", schemaName, tableName)
@@ -56,7 +56,7 @@ func (l *PostgresLoader) Load(ctx context.Context) (Schema, error) {
 		if !ok {
 			table = Table{Name: fullTable, Columns: map[string]Column{}, Indexes: map[string]Index{}}
 		}
-		table.Columns[columnName] = Column{Name: columnName}
+		table.Columns[columnName] = Column{Name: columnName, Type: dataType}
 		builder.Tables[fullTable] = table
 	}
 	if err := rows.Err(); err != nil {
