@@ -59,6 +59,8 @@ func runScan(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	configPath := fs.String("config", defaultConfigName, "config file path")
 	jsonOnly := fs.Bool("json", false, "output JSON only")
+	sarifOnly := fs.Bool("sarif", false, "output SARIF only")
+	refreshSchema := fs.Bool("refresh-schema", false, "refresh schema cache")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -81,10 +83,13 @@ func runScan(ctx context.Context, args []string) error {
 	reg := rules.NewRegistry()
 	reg.Register(&rules.FieldNotExistsRule{})
 	reg.Register(&rules.MissingIndexRule{SearchPath: cfg.Schema.SearchPath})
+	if err := rules.LoadPlugins(reg, cfg.Rules.Plugins); err != nil {
+		return err
+	}
 
 	collector := &analyzer.ASTInspector{}
 	parserImpl := &parser.VitessParser{}
-	loader := resolveSchema(cfg)
+	loader := resolveSchema(cfg, *refreshSchema)
 
 	eng := analyzer.Engine{
 		Collector: collector,
@@ -96,6 +101,13 @@ func runScan(ctx context.Context, args []string) error {
 	diags, err := eng.Analyze(ctx, cfg)
 	if err != nil {
 		return err
+	}
+
+	if *sarifOnly || cfg.Output.Sarif {
+		if err := output.WriteSARIF(os.Stdout, diags); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	if err := output.WriteJSON(os.Stdout, diags); err != nil {
@@ -113,11 +125,17 @@ func runScan(ctx context.Context, args []string) error {
 	return nil
 }
 
-func resolveSchema(cfg config.Config) schema.Loader {
+func resolveSchema(cfg config.Config, refresh bool) schema.Loader {
 	cache := schema.Cache{Path: cfg.Schema.CachePath, TTL: time.Duration(cfg.Schema.CacheTTL) * time.Second}
+	if refresh {
+		cache.TTL = 0
+	}
+
 	switch cfg.Schema.Driver {
 	case "postgres":
 		return schema.CachedLoader{Loader: &schema.PostgresLoader{DSN: cfg.Schema.DSN, SearchPath: cfg.Schema.SearchPath}, Cache: cache, Source: "postgres", SearchPath: cfg.Schema.SearchPath}
+	case "mysql":
+		return schema.CachedLoader{Loader: &schema.MySQLLoader{DSN: cfg.Schema.DSN}, Cache: cache, Source: "mysql", SearchPath: cfg.Schema.SearchPath}
 	case "ddl":
 		return schema.CachedLoader{Loader: &schema.DDLLoader{Path: cfg.Schema.DDL}, Cache: cache, Source: "ddl", SearchPath: cfg.Schema.SearchPath}
 	default:

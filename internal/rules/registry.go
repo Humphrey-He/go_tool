@@ -40,3 +40,26 @@ func (r *Registry) All() []Rule {
 	}
 	return items
 }
+
+func (r *Registry) Filtered(enable, disable []string) []Rule {
+	enabled := map[string]bool{}
+	disabled := map[string]bool{}
+	for _, id := range enable {
+		enabled[id] = true
+	}
+	for _, id := range disable {
+		disabled[id] = true
+	}
+
+	items := make([]Rule, 0, len(r.rules))
+	for id, rule := range r.rules {
+		if disabled[id] {
+			continue
+		}
+		if len(enabled) > 0 && !enabled[id] {
+			continue
+		}
+		items = append(items, rule)
+	}
+	return items
+}

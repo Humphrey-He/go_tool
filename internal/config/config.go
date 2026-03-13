@@ -25,12 +25,14 @@ type ScanConfig struct {
 }
 
 type RulesConfig struct {
-	Enable  []string `toml:"enable" json:"enable" yaml:"enable"`
-	Disable []string `toml:"disable" json:"disable" yaml:"disable"`
+	Enable   []string `toml:"enable" json:"enable" yaml:"enable"`
+	Disable  []string `toml:"disable" json:"disable" yaml:"disable"`
+	Plugins  []string `toml:"plugins" json:"plugins" yaml:"plugins"`
 }
 
 type OutputConfig struct {
-	JSON bool `toml:"json" json:"json" yaml:"json"`
+	JSON  bool `toml:"json" json:"json" yaml:"json"`
+	Sarif bool `toml:"sarif" json:"sarif" yaml:"sarif"`
 }
 
 func DefaultConfig() Config {
@@ -48,7 +50,8 @@ func DefaultConfig() Config {
 			TimeoutMs: 500,
 		},
 		Rules: RulesConfig{
-			Enable: []string{},
+			Enable:  []string{},
+			Plugins: []string{},
 		},
 		Output: OutputConfig{
 			JSON: true,
