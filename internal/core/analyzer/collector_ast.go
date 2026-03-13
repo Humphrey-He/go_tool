@@ -59,6 +59,7 @@ func (c *ASTInspector) Collect(ctx context.Context, cfg config.Config) ([]Occurr
 				Column:  pos.Column,
 				Snippet: lit,
 				SQL:     lit,
+				Kind:    OccurrenceKindSQL,
 			})
 
 			return true
@@ -67,7 +68,16 @@ func (c *ASTInspector) Collect(ctx context.Context, cfg config.Config) ([]Occurr
 		// GORM chains collector
 		chains := ExtractGormChains(file)
 		for _, chain := range chains {
+			currentTable := ""
 			for _, call := range chain.Calls {
+				if call.Method == "Model" || call.Method == "Table" {
+					if len(call.Args) > 0 {
+						if table, ok := ExtractModelTable(call.Args[0]); ok {
+							currentTable = table
+						}
+					}
+				}
+
 				if call.Method != "Where" {
 					continue
 				}
@@ -88,7 +98,7 @@ func (c *ASTInspector) Collect(ctx context.Context, cfg config.Config) ([]Occurr
 					continue
 				}
 
-				field, ok := ExtractWhereFields(call.Args[0])
+				field, op, ok := ExtractWhereFields(call.Args[0])
 				if !ok {
 					continue
 				}
@@ -100,6 +110,8 @@ func (c *ASTInspector) Collect(ctx context.Context, cfg config.Config) ([]Occurr
 					Column:  pos.Column,
 					Snippet: field,
 					SQL:     field,
+					Table:   currentTable,
+					Op:      op,
 					Kind:    OccurrenceKindGormWhere,
 				})
 			}

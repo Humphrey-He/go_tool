@@ -3,6 +3,7 @@
 import (
 	"go/ast"
 	"go/token"
+	"sort"
 	"strings"
 )
 
@@ -64,9 +65,19 @@ func ExtractGormChains(file *ast.File) []GormChain {
 			if !ok {
 				return true
 			}
-			if isGormSelectorCall(rhsCall) {
-				register(lhsIdent.Name, rhsCall)
+			if !isGormSelectorCall(rhsCall) {
+				return true
 			}
+
+			if recv, ok := receiverIdent(rhsCall); ok {
+				if prev := chains[recv.Name]; prev != nil {
+					chain := &GormChain{VarName: lhsIdent.Name}
+					chain.Calls = append(chain.Calls, prev.Calls...)
+					chains[lhsIdent.Name] = chain
+				}
+			}
+
+			register(lhsIdent.Name, rhsCall)
 		case *ast.CallExpr:
 			if sel, ok := node.Fun.(*ast.SelectorExpr); ok {
 				if recv, ok := sel.X.(*ast.Ident); ok {
@@ -84,9 +95,24 @@ func ExtractGormChains(file *ast.File) []GormChain {
 		if len(chain.Calls) == 0 {
 			continue
 		}
+		sort.Slice(chain.Calls, func(i, j int) bool {
+			return chain.Calls[i].Pos < chain.Calls[j].Pos
+		})
 		out = append(out, *chain)
 	}
 	return out
+}
+
+func receiverIdent(call *ast.CallExpr) (*ast.Ident, bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	return ident, true
 }
 
 func isGormSelectorCall(call *ast.CallExpr) bool {
@@ -102,25 +128,38 @@ func isGormSelectorCall(call *ast.CallExpr) bool {
 	return true
 }
 
-func ExtractWhereFields(arg ast.Expr) (string, bool) {
+func ExtractWhereFields(arg ast.Expr) (string, string, bool) {
 	lit, ok := arg.(*ast.BasicLit)
 	if !ok || lit.Kind != token.STRING {
-		return "", false
+		return "", "", false
 	}
 	raw := strings.Trim(lit.Value, "`\"")
-	// naive parse: take first token before space or operator
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", false
+		return "", "", false
 	}
-	tok := raw
+
+	op := detectOperator(raw)
+	field := raw
 	for i, ch := range raw {
 		if ch == ' ' || ch == '\t' || ch == '=' || ch == '>' || ch == '<' {
-			tok = raw[:i]
+			field = raw[:i]
 			break
 		}
 	}
-	return tok, true
+	field = strings.TrimSpace(field)
+	return field, op, field != ""
+}
+
+func detectOperator(raw string) string {
+	upper := strings.ToUpper(raw)
+	ops := []string{" NOT IN ", " IN ", " LIKE ", " ILIKE ", " != ", " <> ", " >= ", " <= ", " = ", " > ", " < ", " @> ", " ?| ", " ?& ", " ? ", " ->> ", " -> "}
+	for _, op := range ops {
+		if strings.Contains(upper, strings.TrimSpace(op)) {
+			return strings.TrimSpace(op)
+		}
+	}
+	return "="
 }
 
 func IsDynamicString(expr ast.Expr) bool {
@@ -136,4 +175,43 @@ func IsDynamicString(expr ast.Expr) bool {
 	default:
 		return true
 	}
+}
+
+func ExtractModelTable(arg ast.Expr) (string, bool) {
+	// Table("users")
+	if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+		name := strings.Trim(lit.Value, "`\"")
+		return name, name != ""
+	}
+
+	// Model(&User{}) or Model(User{})
+	switch expr := arg.(type) {
+	case *ast.UnaryExpr:
+		if comp, ok := expr.X.(*ast.CompositeLit); ok {
+			if ident, ok := comp.Type.(*ast.Ident); ok {
+				return toSnakePlural(ident.Name), true
+			}
+		}
+	case *ast.CompositeLit:
+		if ident, ok := expr.Type.(*ast.Ident); ok {
+			return toSnakePlural(ident.Name), true
+		}
+	}
+
+	return "", false
+}
+
+func toSnakePlural(name string) string {
+	var out []rune
+	for i, r := range name {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			out = append(out, '_')
+		}
+		out = append(out, rune(strings.ToLower(string(r))[0]))
+	}
+	res := string(out)
+	if !strings.HasSuffix(res, "s") {
+		res += "s"
+	}
+	return res
 }

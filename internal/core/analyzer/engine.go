@@ -23,6 +23,8 @@ type Occurrence struct {
 	Column  int
 	Snippet string
 	SQL     string
+	Table   string
+	Op      string
 	Kind    OccurrenceKind
 }
 
@@ -71,7 +73,7 @@ func (e *Engine) Analyze(ctx context.Context, cfg config.Config) ([]report.Diagn
 		}
 
 		if occ.Kind == OccurrenceKindGormWhere {
-			ir := parser.SQLIR{Raw: occ.SQL, Tables: nil, Columns: []parser.ColumnRef{{Table: "", Column: occ.SQL}}}
+			ir := parser.SQLIR{Raw: occ.SQL, Tables: []parser.TableRef{{Name: occ.Table}}, Columns: []parser.ColumnRef{{Table: occ.Table, Column: occ.SQL, Op: occ.Op}}}
 			ctxRule := rules.Context{
 				File:    occ.File,
 				Line:    occ.Line,
