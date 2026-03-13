@@ -1,0 +1,147 @@
+﻿# SQL 语义安全校验工具（SQL Semantic Lint）
+
+一个面向 Go 项目的编译期 SQL 语义检查工具：在编译/CI 阶段静态校验代码中嵌入的 SQL（字符串与 ORM 调用），结合目标数据库 schema 做语义检查（字段/表存在性、可用索引、潜在全表扫描、危险语句等）。
+
+## 项目说明
+
+### 目标
+
+- 在编译期发现 SQL 语义问题，而不是在运行期或线上发现。
+- 支持常见 SQL 语句和 ORM 语句的字段/索引校验。
+- 集成 `go vet` 与 `golangci-lint`，作为开发者工具链的一部分。
+
+### 核心思路
+
+- 使用 Go AST 解析器扫描源码，提取 SQL 字符串或 ORM 方法链。
+- 解析 SQL 抽象语法树，抽取表名、字段、条件、排序等语义要素。
+- 根据 Schema 元信息进行校验：字段是否存在、索引是否命中、潜在慢查询风险提示。
+
+### 价值
+
+- 在提交代码前减少逻辑性 SQL 错误。
+- 降低漏写索引导致的性能问题。
+- 形成可复用的工程化能力，为后续自动化优化提供基础。
+
+## 功能清单
+
+- 代码扫描
+- SQL 字符串识别（静态/格式化字符串/占位符拼接）
+- ORM 调用识别（GORM、sqlx、database/sql）
+- SQL 语义解析（`SELECT/UPDATE/DELETE/INSERT`）
+- Schema 驱动校验（表/字段/主键/唯一索引/普通索引/外键/列类型）
+- 索引命中检查（基于 `WHERE` 条件的索引覆盖建议）
+- 性能风险提示（潜在全表扫描、危险语句、复杂 `LIKE`）
+- 规则引擎（规则注册/启用/禁用，自定义规则插件）
+- 输出与集成（JSON 诊断 + 终端 summary，CI 支持）
+- CLI（`init`/`scan`/`serve` 可选，支持 mono-repo）
+
+## 设计原则
+
+- 小而可测、可扩展、非侵入（零改动源码调用）
+- 精确定位（文件:行:列 + 原始 SQL 片段 + 修复建议）
+- 规则插件化（Go plugin 或动态配置）
+- 多输入源支持（字符串/格式化/拼接/ORM）
+- Schema 驱动（可从 live DB 或 DDL 加载）
+- 并行分析（可配置 worker 池）
+- CI 友好（机器可读输出与稳定退出码）
+- 安全与隐私（不上传源码，远程拉取 schema 可审计）
+
+## 开发规范
+
+- Go 版本：Go 1.21+，必要时使用 `go:build` 约束
+- 语义化版本：`v0.1.0` 起
+- 代码风格：`gofmt`/`gofumpt`，`golangci-lint` 严格规则（`errcheck`, `staticcheck`, `gosimple`, `govet`）
+- 包边界：`api/cli/core/analyzer/parser/schema/rules/output`
+- 接口优先，避免全局可变状态
+- 并发：worker 池扫描，数量可配置
+- 错误处理：统一 error 包装（`errors.Join`/`fmt.Errorf("%w")`），输出稳定 code
+- 日志：结构化 logger（`zap`/`zerolog`），支持 `--json-log`
+- 测试：单测覆盖 ≥ 80%，关键路径 `Benchmark`
+- 文档：pkg doc + README + CLI 示例 + Rule 编写示例
+
+## SDD 文档
+
+- 详见 [docs/SDD.md](E:\awesomeProject\go_tool\docs\SDD.md)
+
+## 项目路线图
+
+### Phase 1：MVP（可用最小版本）
+
+- AST 扫描 SQL 字符串
+- 支持 `SELECT/UPDATE/DELETE` 语义解析
+- Schema 加载（支持 MySQL 或 DDL）
+- 字段/表存在性校验
+- CLI 输出诊断信息（JSON + summary）
+
+### Phase 2：GORM 支持与索引提示
+
+- 解析 GORM 链式调用
+- `WHERE` 条件索引匹配校验
+- 输出索引缺失或未命中的提示
+- 支持复合索引检测
+
+### Phase 3：工程化集成
+
+- `go vet` 插件化
+- `golangci-lint` 插件化
+- CI 运行支持与基线忽略
+
+### Phase 4：扩展与优化
+
+- 支持更多数据库（PostgreSQL、SQLite）
+- 支持更复杂 SQL 语法（子查询、CTE、窗口函数）
+- 输出优化建议（索引推荐、语句重写建议）
+
+## 快速开始
+
+```
+# 初始化配置
+sqlsafelint init
+
+# 运行扫描
+sqlsafelint scan
+```
+
+## 配置文件示例（.sqlsafelint.json）
+
+```
+{
+  "schema": {
+    "driver": "mysql",
+    "dsn": "user:pass@tcp(127.0.0.1:3306)/db",
+    "ddl": ""
+  },
+  "scan": {
+    "workspace": "",
+    "include": ["**/*.go"],
+    "exclude": ["**/vendor/**", "**/.git/**"],
+    "workers": 0
+  },
+  "rules": {
+    "enable": [],
+    "disable": []
+  },
+  "output": {
+    "json": true
+  }
+}
+```
+
+## 目录结构（当前）
+
+```
+cmd/sqlsafelint
+internal/cli
+internal/config
+internal/core/analyzer
+internal/output
+internal/parser
+internal/report
+internal/rules
+internal/schema
+docs/SDD.md
+```
+
+## 许可证
+
+MIT
